@@ -15,6 +15,11 @@ env/
 *.env
 !*.env.example
 
+# Generated per-machine launchers (created by desktop/setup.py)
+Run QCM Solver.bat
+Run QCM Solver.command
+run-qcm-solver.sh
+
 # OS / editor
 .DS_Store
 Thumbs.db
