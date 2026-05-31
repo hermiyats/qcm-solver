@@ -33,6 +33,10 @@ DEFAULT_ENDPOINT = os.environ.get(
     "QCM_ENDPOINT", "https://qcm-solver.vercel.app/api/solve"
 )
 
+# Shared secret that authorises requests to the middle layer. Set it via the
+# QCM_ACCESS_TOKEN env var (recommended) or paste it into the Token field.
+DEFAULT_TOKEN = os.environ.get("QCM_ACCESS_TOKEN", "")
+
 THUMB_SIZE = (140, 100)
 REQUEST_TIMEOUT = 180  # seconds — Claude may think for a while on hard questions
 
@@ -161,6 +165,23 @@ class QCMApp:
         ttk.Entry(top, textvariable=self.endpoint_var).pack(
             side="left", fill="x", expand=True, padx=(6, 0)
         )
+
+        # ── Row 1b: access token (masked) ────────────────────────────────────
+        tokrow = ttk.Frame(self.root, padding=(10, 2, 10, 2))
+        tokrow.pack(fill="x")
+        ttk.Label(tokrow, text="Token:").pack(side="left")
+        self.token_var = tk.StringVar(value=DEFAULT_TOKEN)
+        self.token_entry = ttk.Entry(tokrow, textvariable=self.token_var, show="•")
+        self.token_entry.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        self._token_shown = False
+
+        def _toggle_token():
+            self._token_shown = not self._token_shown
+            self.token_entry.configure(show="" if self._token_shown else "•")
+            show_btn.configure(text="Hide" if self._token_shown else "Show")
+
+        show_btn = ttk.Button(tokrow, text="Show", width=6, command=_toggle_token)
+        show_btn.pack(side="left")
 
         # ── Row 2: model · effort · mode ─────────────────────────────────────
         cfg = ttk.Frame(self.root, padding=(10, 4, 10, 2))
@@ -312,6 +333,13 @@ class QCMApp:
         if not endpoint:
             messagebox.showwarning("Missing endpoint", "Enter the API endpoint URL.")
             return
+        token = self.token_var.get().strip()
+        if not token:
+            messagebox.showwarning(
+                "Missing token",
+                "Enter the access token (or set the QCM_ACCESS_TOKEN env var).",
+            )
+            return
 
         model  = self.model_var.get()
         effort = self.effort_var.get()
@@ -325,11 +353,11 @@ class QCMApp:
 
         threading.Thread(
             target=self._send_worker,
-            args=(endpoint, model, effort, prompt),
+            args=(endpoint, token, model, effort, prompt),
             daemon=True,
         ).start()
 
-    def _send_worker(self, endpoint, model, effort, prompt):
+    def _send_worker(self, endpoint, token, model, effort, prompt):
         try:
             images = []
             for img in self.screenshots:
@@ -348,7 +376,10 @@ class QCMApp:
                 "effort": effort,
                 "prompt": prompt,
             }
-            resp = requests.post(endpoint, json=payload, timeout=REQUEST_TIMEOUT)
+            headers = {"Authorization": f"Bearer {token}"}
+            resp = requests.post(
+                endpoint, json=payload, headers=headers, timeout=REQUEST_TIMEOUT
+            )
             if resp.status_code >= 400:
                 try:
                     detail = resp.json().get("error", resp.text)

@@ -7,10 +7,35 @@
 // The Anthropic API key lives only here (Vercel env var ANTHROPIC_API_KEY) —
 // the desktop client never sees it.
 
+import { timingSafeEqual } from "node:crypto";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
+
+// Shared secret. Only requests presenting this token (Authorization: Bearer …,
+// or x-api-key) are accepted — this keeps random callers off our rate limits.
+const ACCESS_TOKEN = process.env.QCM_ACCESS_TOKEN ?? "";
+
+// Constant-time comparison so we don't leak the token length/contents via
+// response timing.
+function tokenMatches(provided: string): boolean {
+  if (!ACCESS_TOKEN || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(ACCESS_TOKEN);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function extractToken(req: VercelRequest): string {
+  const auth = req.headers["authorization"];
+  if (typeof auth === "string" && auth.startsWith("Bearer ")) {
+    return auth.slice("Bearer ".length).trim();
+  }
+  const key = req.headers["x-api-key"];
+  if (typeof key === "string") return key.trim();
+  return "";
+}
 
 const DEFAULT_MODEL = process.env.QCM_MODEL ?? "claude-opus-4-5";
 const MAX_TOKENS = Number(process.env.QCM_MAX_TOKENS ?? "16000");
@@ -145,6 +170,18 @@ interface ImageInput {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed. Use POST." });
+    return;
+  }
+
+  // ── Authorisation ──────────────────────────────────────────────────────────
+  // Fail closed: if no token is configured server-side, reject everything
+  // rather than silently running unprotected.
+  if (!ACCESS_TOKEN) {
+    res.status(503).json({ error: "Server is missing QCM_ACCESS_TOKEN configuration." });
+    return;
+  }
+  if (!tokenMatches(extractToken(req))) {
+    res.status(401).json({ error: "Unauthorized. Missing or invalid access token." });
     return;
   }
 
