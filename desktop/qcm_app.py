@@ -274,7 +274,7 @@ class QCMApp:
         self.answer_text.pack(fill="both", expand=True)
 
         # ── Status bar ────────────────────────────────────────────────────────
-        self.status_var = tk.StringVar(value="Click "New" to capture a screenshot.")
+        self.status_var = tk.StringVar(value='Click "New" to capture a screenshot.')
         ttk.Label(
             self.root, textvariable=self.status_var, relief="sunken", anchor="w"
         ).pack(fill="x", side="bottom")
@@ -317,7 +317,7 @@ class QCMApp:
     def on_clear(self):
         self.screenshots.clear()
         self._set_answer("")
-        self.status_var.set("Cleared. Click "New" to start again.")
+        self.status_var.set('Cleared. Click "New" to start again.')
         self._refresh()
 
     def _remove(self, index):
