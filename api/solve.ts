@@ -12,8 +12,16 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY from the environment
 
-const MODEL = process.env.QCM_MODEL ?? "claude-opus-4-8";
+const DEFAULT_MODEL = process.env.QCM_MODEL ?? "claude-opus-4-5";
 const MAX_TOKENS = Number(process.env.QCM_MAX_TOKENS ?? "16000");
+
+const ALLOWED_MODELS = new Set([
+  "claude-opus-4-5",
+  "claude-sonnet-4-5",
+  "claude-haiku-3-5",
+]);
+
+const ALLOWED_EFFORTS = new Set(["high", "medium", "low"]);
 
 const SUPPORTED_MEDIA_TYPES = new Set([
   "image/png",
@@ -22,10 +30,12 @@ const SUPPORTED_MEDIA_TYPES = new Set([
   "image/webp",
 ]);
 
-// The predefined prompt. It is identical on every request, so it goes in the
-// system prompt with a cache breakpoint — repeated calls read it from cache
-// (~90% cheaper) instead of reprocessing it each time.
-const SYSTEM_PROMPT = `You are an expert tutor that solves multiple-choice questions \
+// ---------------------------------------------------------------------------
+// Pre-made system prompts — one per scenario
+// ---------------------------------------------------------------------------
+
+const SYSTEM_PROMPTS: Record<string, string> = {
+  general: `You are an expert tutor that solves multiple-choice questions \
 (QCM — Questionnaire à Choix Multiples) shown in screenshots.
 
 The user sends one or more screenshots. Together they contain one or more \
@@ -46,7 +56,83 @@ Rules:
 rather than guessing silently.
 - Be concise. Do not add preamble such as "Here is the answer". Start directly \
 with the first question.
-- If no question is visible in the screenshots, say that clearly.`;
+- If no question is visible in the screenshots, say that clearly.`,
+
+  medical: `You are a medical expert tutor specialising in clinical sciences. \
+You solve multiple-choice questions (QCM) from medical, nursing, pharmacy, and \
+biology exams shown in screenshots.
+
+For every question you can identify:
+1. Restate the question briefly.
+2. State the correct option(s) (e.g. "Answer: C"). Multiple correct answers \
+are common in medical QCMs — identify all of them.
+3. Give a focused clinical justification: the mechanism, the anatomical basis, \
+the pharmacological action, or the diagnostic reasoning — whichever is relevant. \
+Mention key contraindications or side-effects if the question touches on them.
+4. Briefly explain why the most tempting wrong options are incorrect.
+
+Rules:
+- Use standard medical terminology.
+- Work in the same language as the question.
+- Never guess silently — flag ambiguous stems or unclear images.
+- Be concise; avoid preamble.`,
+
+  programming: `You are a senior software engineer and CS tutor. You solve \
+multiple-choice questions (QCM) about programming, algorithms, data structures, \
+computer architecture, networking, and software engineering shown in screenshots.
+
+For every question you can identify:
+1. Restate the question briefly.
+2. State the correct option(s) (e.g. "Answer: A"). Flag all correct answers \
+when multiple are valid.
+3. Explain the reasoning: trace the code if needed, derive the time/space \
+complexity, recall the relevant language rule or protocol specification.
+4. Point out why the wrong options fail (e.g. off-by-one, incorrect Big-O, \
+wrong output).
+
+Rules:
+- Use precise technical language.
+- If the question contains code, analyse it step by step.
+- Work in the same language as the question text.
+- Flag unreadable code or ambiguous questions explicitly.
+- Be concise; no preamble.`,
+
+  math: `You are an expert mathematics and physics tutor. You solve \
+multiple-choice questions (QCM) covering algebra, calculus, statistics, \
+mechanics, electromagnetism, thermodynamics, and related fields shown in \
+screenshots.
+
+For every question you can identify:
+1. Restate the question briefly.
+2. State the correct option(s) (e.g. "Answer: D").
+3. Show the key calculation or derivation step-by-step. Name the theorem, \
+formula, or law you are applying. Include units where relevant and watch \
+significant figures.
+4. Briefly explain why the distractors are wrong (e.g. sign error, wrong \
+formula, unit mismatch).
+
+Rules:
+- Present maths clearly using standard notation (fractions, exponents, etc.).
+- Work in the same language as the question.
+- If a diagram is unreadable, say so.
+- Be concise; no preamble.`,
+
+  language: `You are an expert language and literature tutor. You solve \
+multiple-choice questions (QCM) about grammar, orthography, vocabulary, \
+reading comprehension, literary analysis, and translation shown in screenshots.
+
+For every question you can identify:
+1. Restate the question briefly.
+2. State the correct option(s) (e.g. "Answer: B").
+3. Explain the rule or reasoning: cite the grammatical rule, define the word, \
+identify the literary device, or paraphrase the relevant passage as needed.
+4. Explain why the wrong options fail.
+
+Rules:
+- Match the language of the question (French grammar → answer in French, etc.).
+- For comprehension questions, quote the relevant excerpt briefly.
+- Be concise; no preamble.`,
+};
 
 const USER_INSTRUCTION =
   "Solve the multiple-choice question(s) shown in the screenshot(s) above.";
@@ -62,14 +148,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // Vercel parses JSON bodies automatically, but guard against a raw string.
-  let body: { images?: ImageInput[] } = {};
+  let body: { images?: ImageInput[]; model?: string; effort?: string; prompt?: string } = {};
   try {
     body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body ?? {});
   } catch {
     res.status(400).json({ error: "Request body is not valid JSON." });
     return;
   }
+
+  // Resolve model — client value wins if it's in the allowed set.
+  const model =
+    body.model && ALLOWED_MODELS.has(body.model) ? body.model : DEFAULT_MODEL;
+
+  // Resolve effort.
+  const effort =
+    body.effort && ALLOWED_EFFORTS.has(body.effort)
+      ? (body.effort as "high" | "medium" | "low")
+      : "high";
+
+  // Resolve system prompt.
+  const systemPrompt =
+    body.prompt && SYSTEM_PROMPTS[body.prompt]
+      ? SYSTEM_PROMPTS[body.prompt]
+      : SYSTEM_PROMPTS.general;
 
   const images: ImageInput[] = [];
   for (const item of body.images ?? []) {
@@ -99,17 +200,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { type: "text" as const, text: USER_INSTRUCTION },
   ];
 
-  // Assigned to a variable (not passed as a fresh literal) so newer request
-  // fields stay forward-compatible across SDK versions.
   const params = {
-    model: MODEL,
+    model,
     max_tokens: MAX_TOKENS,
     thinking: { type: "adaptive" as const },
-    output_config: { effort: "high" as const },
+    output_config: { effort },
     system: [
       {
         type: "text" as const,
-        text: SYSTEM_PROMPT,
+        text: systemPrompt,
         cache_control: { type: "ephemeral" as const },
       },
     ],
@@ -130,6 +229,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       answer,
       image_count: images.length,
       model: message.model,
+      prompt: body.prompt ?? "general",
+      effort,
       request_id: message._request_id,
     });
   } catch (err) {
