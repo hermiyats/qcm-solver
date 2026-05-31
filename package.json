@@ -2,7 +2,6 @@
   "name": "qcm-solver-api",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
   "description": "Middle-layer API (Vercel serverless functions) between the QCM desktop app and the Claude API.",
   "scripts": {
     "typecheck": "tsc --noEmit"
