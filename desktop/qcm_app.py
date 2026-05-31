@@ -30,7 +30,7 @@ from PIL import Image, ImageTk
 
 # Where the middle layer lives. Override with the QCM_ENDPOINT env var, e.g.
 #   QCM_ENDPOINT=https://your-project.vercel.app/api/solve
-DEFAULT_ENDPOINT = os.environ.get("QCM_ENDPOINT", "https://your-project.vercel.app/api/solve")
+DEFAULT_ENDPOINT = os.environ.get("QCM_ENDPOINT", "https://qcm-solver.vercel.app/api/solve")
 
 THUMB_SIZE = (140, 100)
 REQUEST_TIMEOUT = 180  # seconds — Claude may think for a while on hard questions
