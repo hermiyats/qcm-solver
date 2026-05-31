@@ -8,7 +8,8 @@ Run this ONCE to get the desktop app ready, then use the launcher it creates.
     Linux   :  python3 setup.py
 
 What it does (the same on every OS):
-  1. Checks your Python is new enough and that tkinter is available.
+  1. Finds the newest Python on the machine that has a modern Tk (8.6+),
+     ignoring old/deprecated ones like the macOS system Python 3.9 (Tk 8.5).
   2. Creates a private virtual environment (.venv) next to this file so the
      app's dependencies never touch your system Python.
   3. Installs the dependencies (mss, Pillow, requests) into that venv.
@@ -23,8 +24,12 @@ This file has no third-party dependencies of its own — it only uses the
 Python standard library, so it runs anywhere Python does.
 """
 
+from __future__ import annotations
+
+import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,7 +44,37 @@ VENV = HERE / ".venv"
 REQUIREMENTS = HERE / "requirements.txt"
 ENV_FILE = HERE / ".env"
 DEFAULT_ENDPOINT = "https://qcm-solver.vercel.app/api/solve"
-MIN_PYTHON = (3, 8)
+
+# A venv inherits the Python that builds it, so we must pick a GOOD base
+# interpreter — recent enough and with a modern Tk. The macOS system Python 3.9
+# ships the deprecated Tk 8.5, which is buggy/unsupported, so we require Tk 8.6+.
+MIN_PYTHON = (3, 10)
+MIN_TK = 8.6
+
+# Interpreter names to look for, newest first. The newest acceptable one wins.
+CANDIDATE_NAMES = [
+    "python3.14",
+    "python3.13",
+    "python3.12",
+    "python3.11",
+    "python3.10",
+    "python3",
+    "python",
+]
+
+# Tiny program we run inside each candidate to read its version + Tk version
+# without needing a display (TkVersion is a module constant set at import).
+_PROBE = (
+    "import sys, json\n"
+    "info = {'ver': list(sys.version_info[:3])}\n"
+    "try:\n"
+    "    import tkinter\n"
+    "    info['tk'] = float(tkinter.TkVersion)\n"
+    "except Exception as e:\n"
+    "    info['tk'] = None\n"
+    "    info['tk_err'] = str(e)\n"
+    "print(json.dumps(info))\n"
+)
 
 
 def say(msg: str = "") -> None:
@@ -72,30 +107,96 @@ def _pause_if_double_clicked() -> None:
 # Steps
 # --------------------------------------------------------------------------- #
 
-def check_python() -> None:
-    step(1, "Checking Python and tkinter...")
-    if sys.version_info < MIN_PYTHON:
-        fail(
-            f"Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ is required, but this is "
-            f"{sys.version.split()[0]}. Install a newer Python from "
-            "https://www.python.org/downloads/ and run setup again."
-        )
+def probe(interpreter: str) -> dict | None:
+    """Return {'ver': [maj, min, mic], 'tk': float|None} for an interpreter,
+    or None if it can't be run."""
     try:
-        import tkinter  # noqa: F401
-    except Exception:
-        system = platform.system()
-        hint = {
-            "Linux": "Install it with your package manager, e.g.\n"
-            "    Debian/Ubuntu:  sudo apt install python3-tk\n"
-            "    Fedora:         sudo dnf install python3-tkinter\n"
-            "    Arch:           sudo pacman -S tk",
-            "Darwin": "Reinstall Python from https://www.python.org/downloads/ "
-            "(the official build bundles tkinter), or:  brew install python-tk",
-            "Windows": "Reinstall Python from https://www.python.org/downloads/ "
-            'and tick "tcl/tk and IDLE" during installation.',
-        }.get(system, "Install the Tk bindings for your Python.")
-        fail("tkinter is missing — the app's window toolkit.\n  " + hint)
-    say(f"  OK — Python {sys.version.split()[0]} with tkinter.")
+        out = subprocess.run(
+            [interpreter, "-c", _PROBE],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    try:
+        return json.loads(out.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def is_acceptable(info: dict | None) -> bool:
+    """A Python is acceptable if it's recent enough AND has a modern Tk."""
+    if not info:
+        return False
+    if tuple(info.get("ver", ())) < MIN_PYTHON:
+        return False
+    tk = info.get("tk")
+    return tk is not None and tk >= MIN_TK
+
+
+def _no_python_hint() -> str:
+    return {
+        "Darwin": "Install a modern Python that bundles Tk 8.6+:\n"
+        "    brew install python-tk        (Homebrew)\n"
+        "    or the installer from https://www.python.org/downloads/\n"
+        "  The macOS system Python 3.9 ships the deprecated Tk 8.5 and is not "
+        "supported.",
+        "Linux": "Install Python 3.10+ and its Tk bindings, e.g.\n"
+        "    Debian/Ubuntu:  sudo apt install python3 python3-venv python3-tk\n"
+        "    Fedora:         sudo dnf install python3 python3-tkinter\n"
+        "    Arch:           sudo pacman -S python tk",
+        "Windows": "Install Python 3.10+ from https://www.python.org/downloads/ "
+        'and tick "tcl/tk and IDLE" during installation.',
+    }.get(platform.system(), "Install Python 3.10+ with Tk 8.6+ bindings.")
+
+
+def select_base_python() -> str:
+    """Find the newest interpreter on this machine that is recent enough and
+    has a modern Tk. This becomes the base the venv is built from — so we never
+    inherit an old/deprecated Tk just because setup.py was launched with it."""
+    step(1, "Finding a suitable Python (recent version + modern Tk)...")
+
+    # De-duplicate by real path, but keep the friendly name order.
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for name in CANDIDATE_NAMES:
+        loc = shutil.which(name)
+        if loc and os.path.realpath(loc) not in seen:
+            seen.add(os.path.realpath(loc))
+            candidates.append(loc)
+    if os.path.realpath(sys.executable) not in seen:
+        candidates.append(sys.executable)
+
+    best: str | None = None
+    best_ver: tuple = ()
+    rejected: list[tuple[str, dict]] = []
+    for loc in candidates:
+        info = probe(loc)
+        if is_acceptable(info):
+            ver = tuple(info["ver"])  # type: ignore[index]
+            if ver > best_ver:
+                best, best_ver = loc, ver
+        elif info:
+            rejected.append((loc, info))
+
+    if best:
+        say(f"  OK — using {best}  (Python {'.'.join(map(str, best_ver))}, "
+            f"Tk {probe(best)['tk']}).")  # type: ignore[index]
+        return best
+
+    if rejected:
+        say("  Found Python, but none is recent enough with a usable Tk "
+            f"{MIN_TK}+:")
+        for loc, info in rejected:
+            ver = ".".join(map(str, info.get("ver", ())))
+            tk = info.get("tk")
+            reason = f"Tk {tk}" if tk else "no tkinter"
+            say(f"    - {loc}  (Python {ver}, {reason})")
+    fail(f"No suitable Python found (need {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+ "
+         f"with Tk {MIN_TK}+).\n  " + _no_python_hint())
 
 
 def venv_python() -> Path:
@@ -104,17 +205,19 @@ def venv_python() -> Path:
     return VENV / "bin" / "python"
 
 
-def create_venv() -> None:
+def create_venv(base_python: str) -> None:
     step(2, "Creating the private virtual environment (.venv)...")
     py = venv_python()
     if py.exists():
-        say("  Already present — reusing it.")
-        return
+        info = probe(str(py))
+        if is_acceptable(info):
+            say(f"  Reusing existing .venv (Python "
+                f"{'.'.join(map(str, info['ver']))}).")  # type: ignore[index]
+            return
+        say("  Existing .venv uses an old/unsuitable Python — rebuilding it.")
+        shutil.rmtree(VENV, ignore_errors=True)
     try:
-        subprocess.run(
-            [sys.executable, "-m", "venv", str(VENV)],
-            check=True,
-        )
+        subprocess.run([base_python, "-m", "venv", str(VENV)], check=True)
     except subprocess.CalledProcessError:
         fail(
             "Could not create a virtual environment. On Debian/Ubuntu you may "
@@ -122,6 +225,11 @@ def create_venv() -> None:
         )
     if not py.exists():
         fail("Virtual environment was created but its Python is missing.")
+    info = probe(str(py))
+    if not is_acceptable(info):
+        tk = (info or {}).get("tk")
+        fail(f"The new .venv still lacks a modern Tk (got Tk {tk}). Install the "
+             "Tk bindings for the chosen Python and run setup again.")
     say("  OK — virtual environment ready.")
 
 
@@ -266,8 +374,8 @@ def main() -> None:
     if not APP.exists():
         fail(f"Could not find the app at {APP}. Keep setup.py next to qcm_app.py.")
 
-    check_python()
-    create_venv()
+    base_python = select_base_python()
+    create_venv(base_python)
     install_deps()
     configure_token()
     launcher = write_launchers()
