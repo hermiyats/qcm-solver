@@ -1,0 +1,18 @@
+{
+  "name": "qcm-solver-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Middle-layer API (Vercel serverless functions) between the QCM desktop app and the Claude API.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": ">=0.40.0"
+  },
+  "devDependencies": {
+    "@types/node": ">=20.0.0",
+    "@vercel/node": ">=3.0.0",
+    "typescript": ">=5.0.0"
+  }
+}
