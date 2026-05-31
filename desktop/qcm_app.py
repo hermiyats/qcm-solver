@@ -45,9 +45,9 @@ REQUEST_TIMEOUT = 180  # seconds — Claude may think for a while on hard questi
 # ---------------------------------------------------------------------------
 
 MODELS = [
-    ("claude-opus-4-5",   "Opus 4.5  (best)"),
-    ("claude-sonnet-4-5", "Sonnet 4.5  (balanced)"),
-    ("claude-haiku-3-5",  "Haiku 3.5  (fast)"),
+    ("claude-opus-4-8",   "Opus 4.8  (best)"),
+    ("claude-sonnet-4-6", "Sonnet 4.6  (balanced)"),
+    ("claude-haiku-4-5",  "Haiku 4.5  (fast)"),
 ]
 
 EFFORTS = [

@@ -20,3 +20,4 @@ env/
 Thumbs.db
 .idea/
 .vscode/
+.vercel

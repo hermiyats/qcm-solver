@@ -37,13 +37,24 @@ function extractToken(req: VercelRequest): string {
   return "";
 }
 
-const DEFAULT_MODEL = process.env.QCM_MODEL ?? "claude-opus-4-5";
+const DEFAULT_MODEL = process.env.QCM_MODEL ?? "claude-opus-4-8";
 const MAX_TOKENS = Number(process.env.QCM_MAX_TOKENS ?? "16000");
 
+// Latest generally-available models (verified against platform.claude.com,
+// June 2026). Opus 4.8 is the most capable; Sonnet 4.6 balances speed/quality;
+// Haiku 4.5 is fastest.
 const ALLOWED_MODELS = new Set([
-  "claude-opus-4-5",
-  "claude-sonnet-4-5",
-  "claude-haiku-3-5",
+  "claude-opus-4-8",
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5",
+]);
+
+// Models that support adaptive thinking + the `effort` parameter. Haiku 4.5
+// supports NEITHER — sending `output_config.effort` or `thinking.adaptive` to
+// it returns a 400, so we branch on this below.
+const ADAPTIVE_EFFORT_MODELS = new Set([
+  "claude-opus-4-8",
+  "claude-sonnet-4-6",
 ]);
 
 const ALLOWED_EFFORTS = new Set(["high", "medium", "low"]);
@@ -237,11 +248,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     { type: "text" as const, text: USER_INSTRUCTION },
   ];
 
-  const params = {
+  // Base request. Adaptive thinking + effort are only attached for models that
+  // support them (Opus 4.8, Sonnet 4.6). Haiku 4.5 rejects both, so it runs a
+  // plain request.
+  const params: Anthropic.MessageCreateParamsStreaming = {
     model,
     max_tokens: MAX_TOKENS,
-    thinking: { type: "adaptive" as const },
-    output_config: { effort },
+    stream: true,
     system: [
       {
         type: "text" as const,
@@ -252,8 +265,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     messages: [{ role: "user" as const, content }],
   };
 
+  const supportsAdaptiveEffort = ADAPTIVE_EFFORT_MODELS.has(model);
+  if (supportsAdaptiveEffort) {
+    params.thinking = { type: "adaptive" };
+    params.output_config = { effort };
+  }
+
   try {
-    const message = await client.messages.create(params);
+    // Stream the response so long answers and any internal processing (thinking,
+    // tool steps) never trip an HTTP timeout. `finalMessage()` waits for the
+    // model to fully finish and returns the complete, assembled message — we
+    // only ever hand the desktop client the final, ready answer.
+    const stream = client.messages.stream(params);
+    const message = await stream.finalMessage();
 
     const answer =
       message.content
@@ -267,8 +291,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       image_count: images.length,
       model: message.model,
       prompt: body.prompt ?? "general",
-      effort,
-      request_id: message._request_id,
+      effort: supportsAdaptiveEffort ? effort : null,
+      request_id: stream.request_id,
     });
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
