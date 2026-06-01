@@ -4,7 +4,7 @@
   "outputDirectory": null,
   "framework": null,
   "functions": {
-    "api/solve.ts": {
+    "api/index.ts": {
       "maxDuration": 60
     },
     "api/health.ts": {

@@ -43,7 +43,7 @@ APP = HERE / "qcm_app.py"
 VENV = HERE / ".venv"
 REQUIREMENTS = HERE / "requirements.txt"
 ENV_FILE = HERE / ".env"
-DEFAULT_ENDPOINT = "https://qcm-solver.vercel.app/api/solve"
+DEFAULT_ENDPOINT = "https://devaily.com/api"
 
 # A venv inherits the Python that builds it, so we must pick a GOOD base
 # interpreter — recent enough and with a modern Tk. The macOS system Python 3.9

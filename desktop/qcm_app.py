@@ -30,7 +30,7 @@ from PIL import Image, ImageTk
 
 # Where the middle layer lives. Override with the QCM_ENDPOINT env var.
 DEFAULT_ENDPOINT = os.environ.get(
-    "QCM_ENDPOINT", "https://qcm-solver.vercel.app/api/solve"
+    "QCM_ENDPOINT", "https://devaily.com/api"
 )
 
 # Shared secret that authorises requests to the middle layer. Set it via the
