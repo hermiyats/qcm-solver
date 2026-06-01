@@ -1,6 +1,6 @@
 // Middle-layer API between the QCM desktop app and the Claude API.
 //
-// Deployed as a Vercel serverless function. Route: POST /api/solve
+// Deployed as a Vercel serverless function. Route: POST /api
 // The desktop app sends screenshots as base64 JSON; this function attaches a
 // fixed QCM-solving prompt, calls Claude, and returns the answer as JSON.
 //
@@ -38,7 +38,7 @@ function extractToken(req: VercelRequest): string {
 }
 
 const DEFAULT_MODEL = process.env.QCM_MODEL ?? "claude-opus-4-8";
-const MAX_TOKENS = Number(process.env.QCM_MAX_TOKENS ?? "16000");
+const MAX_TOKENS = Number(process.env.QCM_MAX_TOKENS ?? "") || 16000;  // guard against NaN if env var is non-numeric
 
 // Latest generally-available models (verified against platform.claude.com,
 // June 2026). Opus 4.8 is the most capable; Sonnet 4.6 balances speed/quality;

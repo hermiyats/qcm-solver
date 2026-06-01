@@ -317,8 +317,21 @@ class QCMApp:
         self.root.after(200, self._capture)
 
     def _capture(self):
+        selector = None
         try:
             selector = RegionSelector(self.root)
+        except Exception as exc:
+            self.root.deiconify()
+            self.root.lift()
+            messagebox.showerror(
+                "Screen capture failed",
+                f"Could not capture the screen:\n{exc}\n\n"
+                "On macOS make sure Screen Recording permission is granted to\n"
+                "Terminal (or your launcher) in System Settings → Privacy.",
+            )
+            self.status_var.set("Screen capture failed — check permissions.")
+            self._refresh()
+            return
         finally:
             self.root.deiconify()
             self.root.lift()
@@ -376,7 +389,7 @@ class QCMApp:
     def _send_worker(self, endpoint, token, model, effort, prompt):
         try:
             images = []
-            for img in self.screenshots:
+            for img in list(self.screenshots):  # snapshot — Remove buttons mutate on main thread
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 images.append(
