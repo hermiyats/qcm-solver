@@ -179,17 +179,14 @@ interface ImageInput {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Only respond to the exact canonical path — sub-paths fall through to this
-  // handler via Vercel's index routing and should return 404.
-  if (req.url && req.url.split("?")[0] !== "/api") {
-    res.status(404).json({ error: "Not found." });
-    return;
-  }
-
   if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed. Use POST." });
+    res.status(405).json({ error: "Method not allowed. Use POST." })
     return;
   }
+  // TEMP DEBUG — remove after one deploy
+  res.setHeader("x-debug-url", req.url ?? "(undefined)");
+  res.setHeader("x-debug-uri", String(req.headers["x-forwarded-uri"] ?? "(none)"));
+  // (handler continues below — auth check will 401 without a token in debug calls)
 
   // ── Authorisation ──────────────────────────────────────────────────────────
   // Fail closed: if no token is configured server-side, reject everything
