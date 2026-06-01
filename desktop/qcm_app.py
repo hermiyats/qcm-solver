@@ -268,10 +268,26 @@ class QCMApp:
         # ── Answer area ───────────────────────────────────────────────────────
         answer_wrap = ttk.LabelFrame(self.root, text="Answer", padding=6)
         answer_wrap.pack(fill="both", expand=True, padx=10, pady=(4, 6))
-        self.answer_text = scrolledtext.ScrolledText(
-            answer_wrap, wrap="word", height=8, state="disabled"
+
+        paned = ttk.PanedWindow(answer_wrap, orient="vertical")
+        paned.pack(fill="both", expand=True)
+
+        # Top pane: one-line-per-question summary (compact, fixed height).
+        quick_frame = ttk.LabelFrame(paned, text="Quick Answers", padding=4)
+        self.quick_text = scrolledtext.ScrolledText(
+            quick_frame, wrap="word", height=4, state="disabled",
+            font=("TkFixedFont", 11),
         )
-        self.answer_text.pack(fill="both", expand=True)
+        self.quick_text.pack(fill="both", expand=True)
+        paned.add(quick_frame, weight=0)
+
+        # Bottom pane: full explanations (expands to fill space).
+        full_frame = ttk.LabelFrame(paned, text="Full Explanation", padding=4)
+        self.full_text = scrolledtext.ScrolledText(
+            full_frame, wrap="word", height=10, state="disabled",
+        )
+        self.full_text.pack(fill="both", expand=True)
+        paned.add(full_frame, weight=1)
 
         # ── Status bar ────────────────────────────────────────────────────────
         self.status_var = tk.StringVar(value='Click "New" to capture a screenshot.')
@@ -439,11 +455,35 @@ class QCMApp:
         self.send_btn.state(["!disabled"] if has_shots else ["disabled"])
         self.clear_btn.state(["!disabled"] if has_shots else ["disabled"])
 
-    def _set_answer(self, text):
-        self.answer_text.configure(state="normal")
-        self.answer_text.delete("1.0", "end")
-        self.answer_text.insert("1.0", text)
-        self.answer_text.configure(state="disabled")
+    # ── Section markers that match the server-side FORMAT_SUFFIX ──────────────
+    _QUICK_MARKER = "## Quick Answers"
+    _FULL_MARKER  = "## Full Answers"
+
+    def _parse_answer(self, raw: str):
+        """Split the AI reply into (quick_summary, full_explanation).
+
+        Looks for the two section headings injected by FORMAT_SUFFIX in the
+        server prompt. If either is missing (e.g. the model went off-format)
+        returns ("", raw) so the full text still shows up somewhere.
+        """
+        q = raw.find(self._QUICK_MARKER)
+        f = raw.find(self._FULL_MARKER)
+        if q == -1 or f == -1:
+            return "", raw
+        quick = raw[q + len(self._QUICK_MARKER):f].strip()
+        full  = raw[f + len(self._FULL_MARKER):].strip()
+        return quick, full
+
+    def _set_text_widget(self, widget, text: str):
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("1.0", text)
+        widget.configure(state="disabled")
+
+    def _set_answer(self, text: str):
+        quick, full = self._parse_answer(text)
+        self._set_text_widget(self.quick_text, quick)
+        self._set_text_widget(self.full_text,  full)
 
     def _set_buttons_enabled(self, enabled):
         flag = ["!disabled"] if enabled else ["disabled"]

@@ -170,6 +170,28 @@ Rules:
 - Be concise; no preamble.`,
 };
 
+// Required response structure — appended to every system prompt so the desktop
+// app can always split the reply into a compact summary pane and a full pane.
+const FORMAT_SUFFIX = `
+
+─────────────────────────────────────────
+REQUIRED RESPONSE FORMAT — follow exactly:
+
+## Quick Answers
+One line per question, in order:
+  <question number> → <answer>
+Rules for the answer part:
+• If the question has labelled options (A/B/C/D, a/b/c/d, 1/2/3/4, i/ii/iii…)
+  write the label(s) only: e.g.  1 → A   or   2 → B, D
+• If there are no option labels, write the shortest phrase that identifies the
+  correct answer: e.g.  3 → Verlet Schema   or   4 → Jacobian of xyz
+• No extra text, no punctuation after the answer, no blank lines between items.
+
+## Full Answers
+Full explanation for every question in the same order — reasoning, justification,
+and why the wrong options are incorrect.
+─────────────────────────────────────────`;
+
 const USER_INSTRUCTION =
   "Solve the multiple-choice question(s) shown in the screenshot(s) above.";
 
@@ -214,11 +236,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? (body.effort as "high" | "medium" | "low")
       : "high";
 
-  // Resolve system prompt.
+  // Resolve system prompt and attach the mandatory response format.
   const systemPrompt =
-    body.prompt && SYSTEM_PROMPTS[body.prompt]
+    (body.prompt && SYSTEM_PROMPTS[body.prompt]
       ? SYSTEM_PROMPTS[body.prompt]
-      : SYSTEM_PROMPTS.general;
+      : SYSTEM_PROMPTS.general) + FORMAT_SUFFIX;
 
   const images: ImageInput[] = [];
   for (const item of body.images ?? []) {
