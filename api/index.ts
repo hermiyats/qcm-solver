@@ -179,6 +179,13 @@ interface ImageInput {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Only respond to the exact canonical path — sub-paths fall through to this
+  // handler via Vercel's index routing and should return 404.
+  if (req.url && req.url.split("?")[0] !== "/api") {
+    res.status(404).json({ error: "Not found." });
+    return;
+  }
+
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed. Use POST." });
     return;
